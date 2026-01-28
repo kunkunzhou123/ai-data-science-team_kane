@@ -6,7 +6,7 @@ Command:
 """
 
 from __future__ import annotations
-
+import traceback #[MOD-001] 2026-01-28 by kane
 import re
 import uuid
 import os
@@ -23,6 +23,7 @@ import streamlit.components.v1 as components
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_community.chat_message_histories import StreamlitChatMessageHistory
 from langchain_openai import ChatOpenAI
+from langchain_deepseek import ChatDeepSeek  #[MOD-002] 2026-01-28 by kane
 
 try:
     from langchain_ollama import ChatOllama  # type: ignore
@@ -4436,11 +4437,11 @@ with st.sidebar:
     st.header("LLM")
     llm_provider = st.selectbox(
         "Provider",
-        ["OpenAI", "Ollama"],
+        ["OpenAI","DeepSeek", "Ollama"],
         index=0,
         key="llm_provider",
-        help="Choose OpenAI (cloud) or Ollama (local).",
-    )
+        help="Choose OpenAI (cloud), DeepSeek (cloud), or Ollama (local).",
+    )  #[MOD-003] 2026-01-28 by kane
 
     ollama_base_url = None
     if llm_provider == "OpenAI":
@@ -4482,6 +4483,47 @@ with st.sidebar:
             ],
             key="openai_model_choice",
         )
+    elif llm_provider == "DeepSeek":
+        deepseek_key_input = st.text_input(
+            "DeepSeek API key",
+            type="password",
+            value=st.session_state.get("DEEPSEEK_API_KEY") or "",
+            key="deepseek_api_key_input",
+            help="Required when using DeepSeek models.",
+        )
+        deepseek_key = (deepseek_key_input or "").strip()
+        st.session_state["DEEPSEEK_API_KEY"] = deepseek_key
+
+        if deepseek_key:
+            try:
+                # 验证 DeepSeek API Key
+                client = OpenAI(
+                    api_key=deepseek_key,
+                    base_url="https://api.deepseek.com"
+                )
+                _ = client.models.list()
+                key_status = "ok"
+                st.success("DeepSeek API Key is valid!")
+            except Exception as e:
+                key_status = "bad"
+                st.error(f"Invalid DeepSeek API Key: {e}")
+        else:
+            st.info(
+                "Please enter your DeepSeek API key to proceed (or switch to another provider)."
+            )
+            st.stop()
+
+        model_choice = st.selectbox(
+            "Model",
+            [
+                "deepseek-chat",
+                "deepseek-coder", 
+                "deepseek-reasoner",
+            ],
+            key="deepseek_model_choice",
+        )#[MOD-004] 2026-01-28 by kane
+
+    
     else:
         if ChatOllama is None:
             st.error(
@@ -4893,6 +4935,7 @@ def build_team(
     llm_provider: str,
     model_name: str,
     openai_api_key: str | None,
+    deepseek_api_key: str | None, #[MOD-005] 2026-01-28 by kane
     ollama_base_url: str | None,
     use_memory: bool,
     sql_url: str,
@@ -4921,6 +4964,13 @@ def build_team(
             except Exception:
                 kwargs["base_url"] = base_url
         llm = ChatOllama(**kwargs)
+    elif llm_provider.lower() == "deepseek":
+        # DeepSeek 使用 OpenAI 兼容接口
+        llm = ChatDeepSeek(
+            model=model_name,
+            api_key=deepseek_api_key
+        )
+        #[MOD-006] 2026-01-28 by kane
     else:
 
         def _openai_requires_responses(model: str | None) -> bool:
@@ -5879,6 +5929,12 @@ if prompt:
                 "OpenAI API key is required and must be valid. Enter it in the sidebar."
             )
             st.stop()
+    elif llm_provider_selected == "DeepSeek":
+        resolved_deepseek_key = (st.session_state.get("DEEPSEEK_API_KEY") or "").strip()
+        if not resolved_deepseek_key or key_status == "bad":
+            st.error("DeepSeek API key is required and must be valid.")
+            st.stop()
+#[MOD-007] 2026-01-28 by kane
     else:
         if not resolved_ollama_model:
             st.error("Ollama model name is required. Enter it in the sidebar.")
@@ -5952,6 +6008,7 @@ if prompt:
             llm_provider_selected,
             model_choice,
             resolved_api_key if llm_provider_selected == "OpenAI" else None,
+            st.session_state.get("DEEPSEEK_API_KEY") if llm_provider_selected == "DeepSeek" else None,  # [Mod-008] 2026-1-28 by kane
             st.session_state.get("ollama_base_url"),
             add_memory,
             st.session_state.get("sql_url", DEFAULT_SQL_URL),
@@ -6300,6 +6357,7 @@ if prompt:
                 )
             else:
                 st.error(f"Error running team: {e}")
+                st.code(traceback.format_exc()) #[Mod-009] 2026-01-28 by kane 完整的错误堆栈信息
             result = None
 
     if result:
